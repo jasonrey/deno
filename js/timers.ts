@@ -3,6 +3,7 @@ import { assert } from "./util";
 import * as msg from "gen/cli/msg_generated";
 import * as flatbuffers from "./flatbuffers";
 import { sendAsync, sendSync } from "./dispatch";
+import { window } from "./window";
 
 interface Timer {
   id: number;
@@ -180,14 +181,20 @@ function fireTimers(): void {
 
 export type Args = unknown[];
 
+function checkThis(thisArg: unknown): void {
+  if (thisArg !== null && thisArg !== undefined && thisArg !== window) {
+    throw new TypeError("Illegal invocation");
+  }
+}
+
 function setTimer(
   cb: (...args: Args) => void,
   delay: number,
   args: Args,
   repeat: boolean
 ): number {
-  // If any `args` were provided (which is uncommon), bind them to the callback.
-  const callback: () => void = args.length === 0 ? cb : cb.bind(null, ...args);
+  // Bind `args` to the callback and bind `this` to window(global).
+  const callback: () => void = cb.bind(window, ...args);
   // In the browser, the delay value must be coercible to an integer between 0
   // and INT32_MAX. Any other value will cause the timer to fire immediately.
   // We emulate this behavior.
@@ -225,6 +232,8 @@ export function setTimeout(
   delay: number,
   ...args: Args
 ): number {
+  // @ts-ignore
+  checkThis(this);
   return setTimer(cb, delay, args, false);
 }
 
@@ -234,6 +243,8 @@ export function setInterval(
   delay: number,
   ...args: Args
 ): number {
+  // @ts-ignore
+  checkThis(this);
   return setTimer(cb, delay, args, true);
 }
 

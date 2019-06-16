@@ -1,6 +1,6 @@
 // Copyright 2018-2019 the Deno authors. All rights reserved. MIT license.
 import { URL } from "./url";
-import { requiredArguments } from "./util";
+import { requiredArguments, isIterable } from "./util";
 
 export class URLSearchParams {
   private params: Array<[string, string]> = [];
@@ -14,6 +14,11 @@ export class URLSearchParams {
 
     if (Array.isArray(init)) {
       this._handleArrayInitialization(init);
+      return;
+    }
+
+    if (isIterable(init)) {
+      this.params = [...init];
       return;
     }
 
@@ -54,6 +59,7 @@ export class URLSearchParams {
   append(name: string, value: string): void {
     requiredArguments("URLSearchParams.append", arguments.length, 2);
     this.params.push([String(name), String(value)]);
+    this.updateSteps();
   }
 
   /** Deletes the given search parameter and its associated value,
@@ -156,6 +162,8 @@ export class URLSearchParams {
     if (!found) {
       this.append(name, value);
     }
+
+    this.updateSteps();
   }
 
   /** Sort all key/value pairs contained in this object in place and
@@ -168,6 +176,7 @@ export class URLSearchParams {
     this.params = this.params.sort(
       (a, b): number => (a[0] === b[0] ? 0 : a[0] > b[0] ? 1 : -1)
     );
+    this.updateSteps();
   }
 
   /** Calls a function for each element contained in this object in

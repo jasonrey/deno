@@ -24,12 +24,11 @@ use crate::state::ThreadSafeState;
 use crate::tokio_util;
 use crate::tokio_write;
 use crate::version;
-use crate::worker::root_specifier_to_url;
 use crate::worker::Worker;
 use deno::js_check;
 use deno::Buf;
 use deno::JSError;
-//use deno::Loader;
+use deno::ModuleSpecifier;
 use deno::Op;
 use deno::PinnedBuf;
 use flatbuffers::FlatBufferBuilder;
@@ -341,7 +340,9 @@ fn op_start(
   let deno_version = version::DENO;
   let deno_version_off = builder.create_string(deno_version);
 
-  let main_module = state.main_module().map(|m| builder.create_string(&m));
+  let main_module = state
+    .main_module()
+    .map(|m| builder.create_string(&m.to_string()));
 
   let xeval_delim = state
     .flags
@@ -504,15 +505,13 @@ fn op_fetch_module_meta_data(
   //  import map - why it is not always resolved? Eg. "bad-module.ts" will return NotFound
   //  error whilst it should return RelativeUrlWithCannotBeABaseBase error
   let resolved_specifier = match &state.import_map {
-    Some(import_map) => {
-      match import_map.resolve(specifier, referrer) {
-        Ok(result) => match result {
-          Some(url) => url.clone(),
-          None => specifier.to_string(),
-        },
-        Err(err) => panic!("error resolving using import map: {:?}", err), // TODO: this should be coerced to DenoError
-      }
-    }
+    Some(import_map) => match import_map.resolve(specifier, referrer) {
+      Ok(result) => match result {
+        Some(module_specifier) => module_specifier.to_string(),
+        None => specifier.to_string(),
+      },
+      Err(err) => return odd_future(DenoError::from(err)),
+    },
     None => specifier.to_string(),
   };
 
@@ -2082,11 +2081,11 @@ fn op_create_worker(
   js_check(worker.execute("denoMain()"));
   js_check(worker.execute("workerMain()"));
 
-  let op = root_specifier_to_url(specifier)
-    .and_then(|specifier_url| {
+  let op = ModuleSpecifier::resolve_root(specifier)
+    .and_then(|module_specifier| {
       Ok(
         worker
-          .execute_mod_async(&specifier_url, false)
+          .execute_mod_async(&module_specifier, false)
           .and_then(move |()| {
             let mut workers_tl = parent_state.workers.lock().unwrap();
             workers_tl.insert(rid, worker.shared());
@@ -2211,10 +2210,17 @@ fn op_host_post_message(
 }
 
 fn op_get_random_values(
-  _state: &ThreadSafeState,
+  state: &ThreadSafeState,
   _base: &msg::Base<'_>,
   data: Option<PinnedBuf>,
 ) -> Box<OpWithError> {
-  thread_rng().fill(&mut data.unwrap()[..]);
+  if let Some(ref seeded_rng) = state.seeded_rng {
+    let mut rng = seeded_rng.lock().unwrap();
+    rng.fill(&mut data.unwrap()[..]);
+  } else {
+    let mut rng = thread_rng();
+    rng.fill(&mut data.unwrap()[..]);
+  }
+
   Box::new(ok_future(empty_buf()))
 }
